@@ -1,4 +1,3 @@
-import { auditLogs, db, dlpRules } from "@/lib/db";
 import { getRulesFromEdgeConfig } from "@/lib/edge-config";
 import {
   type DlpRule,
@@ -6,7 +5,6 @@ import {
   getFirewall,
   initFirewall,
 } from "@/lib/wasm/firewall";
-import { eq } from "drizzle-orm";
 
 // Edge Runtime on Vercel. For local testing use the /api/echo route with nodejs runtime.
 export const runtime = "edge";
@@ -30,22 +28,10 @@ async function getOrInitFirewall(): Promise<EdgeFirewall> {
   const existing = getFirewall();
   if (existing) return existing;
 
-  let rules: DlpRule[] = [];
-  try {
-    // Try Edge Config first (< 1ms on Vercel); falls back to DB if not configured
-    const fromEdgeConfig = await getRulesFromEdgeConfig();
-    if (fromEdgeConfig.length > 0) {
-      rules = fromEdgeConfig.filter((r) => r.enabled) as DlpRule[];
-    } else {
-      // Local dev or Edge Config not yet populated — read directly from DB
-      rules = (await db
-        .select()
-        .from(dlpRules)
-        .where(eq(dlpRules.enabled, true))) as DlpRule[];
-    }
-  } catch {
-    // Last resort: no rules, pass-through
-  }
+  // Edge Runtime: read rules exclusively from Edge Config (no Drizzle at edge)
+  const rules = await getRulesFromEdgeConfig()
+    .then((r) => r.filter((rule) => rule.enabled) as DlpRule[])
+    .catch(() => [] as DlpRule[]);
 
   return initFirewall(rules);
 }
@@ -141,7 +127,7 @@ async function proxyHandler(req: Request, path: string[]): Promise<Response> {
   });
 }
 
-// Direct DB write — no HTTP round-trip, works reliably in nodejs runtime
+// Fire-and-forget HTTP call to the Node.js /api/logs endpoint (Drizzle can't run in Edge Runtime)
 async function writeAuditLog(
   path: string,
   severity: string,
@@ -149,17 +135,29 @@ async function writeAuditLog(
   scanResult?: ReturnType<EdgeFirewall["scan"]>
 ) {
   const threat = scanResult?.threats[0];
-  await db.insert(auditLogs).values({
-    ruleId: threat?.rule_id ?? null,
-    ruleName: null,
-    matchedText: threat
-      ? new TextDecoder().decode(
-          chunk.slice(threat.offset, threat.offset + threat.length)
-        )
-      : null,
-    replacedWith: "[REDACTED]",
-    path,
-    severity,
+  const origin = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000";
+  await fetch(`${origin}/api/logs`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(process.env.FIREWALL_INTERNAL_KEY
+        ? { "x-firewall-key": process.env.FIREWALL_INTERNAL_KEY }
+        : {}),
+    },
+    body: JSON.stringify({
+      ruleId: threat?.rule_id ?? null,
+      ruleName: null,
+      matchedText: threat
+        ? new TextDecoder().decode(
+            chunk.slice(threat.offset, threat.offset + threat.length)
+          )
+        : null,
+      replacedWith: "[REDACTED]",
+      path,
+      severity,
+    }),
   });
 }
 
