@@ -17,6 +17,7 @@
 
 export interface DlpRule {
   id: string;
+  name: string;
   pattern: string;
   replacement: string;
   severity: "block" | "redact" | "warn";
@@ -24,6 +25,7 @@ export interface DlpRule {
 
 export interface Threat {
   rule_id: string;
+  rule_name: string;
   severity: string;
   offset: number;
   length: number;
@@ -65,6 +67,7 @@ export class EdgeFirewall {
         if (rule.severity === "block") blocked = true;
         threats.push({
           rule_id: rule.id,
+          rule_name: rule.name,
           severity: rule.severity,
           offset: m.index,
           length: m[0].length,
