@@ -1,3 +1,4 @@
+import { auditLogs, db, dlpRules } from "@/lib/db";
 import { getRulesFromEdgeConfig } from "@/lib/edge-config";
 import {
   type DlpRule,
@@ -5,8 +6,11 @@ import {
   getFirewall,
   initFirewall,
 } from "@/lib/wasm/firewall";
+import { eq } from "drizzle-orm";
 
-export const runtime = "edge";
+// nodejs locally (Edge sandbox blocks outbound fetch in dev).
+// On Vercel, set NEXT_RUNTIME=edge in project env vars to use the edge runtime.
+export const runtime = "nodejs";
 
 // JSON-RPC error object returned when a block-severity rule fires
 function jsonRpcError(id: unknown, message: string) {
@@ -29,10 +33,19 @@ async function getOrInitFirewall(): Promise<EdgeFirewall> {
 
   let rules: DlpRule[] = [];
   try {
-    const raw = await getRulesFromEdgeConfig();
-    rules = raw.filter((r) => r.enabled) as DlpRule[];
+    // Try Edge Config first (< 1ms on Vercel); falls back to DB if not configured
+    const fromEdgeConfig = await getRulesFromEdgeConfig();
+    if (fromEdgeConfig.length > 0) {
+      rules = fromEdgeConfig.filter((r) => r.enabled) as DlpRule[];
+    } else {
+      // Local dev or Edge Config not yet populated — read directly from DB
+      rules = (await db
+        .select()
+        .from(dlpRules)
+        .where(eq(dlpRules.enabled, true))) as DlpRule[];
+    }
   } catch {
-    // Edge Config not configured — run with zero rules (pass-through)
+    // Last resort: no rules, pass-through
   }
 
   return initFirewall(rules);
@@ -56,18 +69,21 @@ async function proxyHandler(req: Request, path: string[]): Promise<Response> {
     targetBase
   );
 
-  // Forward the request to the upstream MCP server
+  const upstreamHeaders = new Headers(req.headers);
+  upstreamHeaders.delete("x-mcp-target");
+  upstreamHeaders.delete("host");
+  upstreamHeaders.delete("expect"); // Invoke-WebRequest sends Expect: 100-continue; undici rejects it
+
+  // Buffer the request body — avoids duplex streaming issues in local dev
+  const body =
+    req.method !== "GET" && req.method !== "HEAD"
+      ? await req.arrayBuffer()
+      : undefined;
+
   const upstreamRes = await fetch(upstreamUrl.toString(), {
     method: req.method,
-    headers: (() => {
-      const h = new Headers(req.headers);
-      h.delete("x-mcp-target");
-      h.delete("host");
-      return h;
-    })(),
-    body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
-    // @ts-expect-error duplex is required for streaming body in some runtimes
-    duplex: "half",
+    headers: upstreamHeaders,
+    body,
   });
 
   const firewall = await getOrInitFirewall();
@@ -80,31 +96,25 @@ async function proxyHandler(req: Request, path: string[]): Promise<Response> {
     });
   }
 
-  const origin = new URL(req.url).origin;
+  const routePath = path.join("/");
   let blocked = false;
 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      if (blocked) return; // drain remaining chunks after a block signal
+    async transform(chunk, controller) {
+      if (blocked) return;
 
       const redacted = firewall.redact(chunk);
 
       if (redacted.length === 0 && chunk.length > 0) {
-        // Empty return from redact() = block-severity match
         blocked = true;
         controller.error(new Error("BLOCK"));
-
-        // Fire-and-forget audit log for the block event
-        logThreat(origin, path.join("/"), "block", chunk).catch(() => {});
+        await writeAuditLog(routePath, "block", chunk).catch(() => {});
         return;
       }
 
-      // Log warn/redact threats asynchronously — never on the critical path
       const scanResult = firewall.scan(new TextDecoder().decode(chunk));
       if (scanResult.threats.length > 0) {
-        logThreat(origin, path.join("/"), "redact", chunk, scanResult).catch(
-          () => {}
-        );
+        await writeAuditLog(routePath, "redact", chunk, scanResult).catch(() => {});
       }
 
       controller.enqueue(redacted);
@@ -132,33 +142,25 @@ async function proxyHandler(req: Request, path: string[]): Promise<Response> {
   });
 }
 
-// Fire-and-forget: write to audit log via the internal /api/logs endpoint
-async function logThreat(
-  origin: string,
+// Direct DB write — no HTTP round-trip, works reliably in nodejs runtime
+async function writeAuditLog(
   path: string,
   severity: string,
   chunk: Uint8Array,
   scanResult?: ReturnType<EdgeFirewall["scan"]>
 ) {
   const threat = scanResult?.threats[0];
-  await fetch(`${origin}/api/logs`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-firewall-key": process.env.FIREWALL_INTERNAL_KEY ?? "",
-    },
-    body: JSON.stringify({
-      ruleId: threat?.rule_id ?? null,
-      ruleName: null,
-      matchedText: threat
-        ? new TextDecoder().decode(
-            chunk.slice(threat.offset, threat.offset + threat.length)
-          )
-        : null,
-      replacedWith: "[REDACTED]",
-      path,
-      severity,
-    }),
+  await db.insert(auditLogs).values({
+    ruleId: threat?.rule_id ?? null,
+    ruleName: null,
+    matchedText: threat
+      ? new TextDecoder().decode(
+          chunk.slice(threat.offset, threat.offset + threat.length)
+        )
+      : null,
+    replacedWith: "[REDACTED]",
+    path,
+    severity,
   });
 }
 
