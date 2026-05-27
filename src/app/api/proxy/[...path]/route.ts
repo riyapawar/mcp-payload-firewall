@@ -8,9 +8,8 @@ import {
 } from "@/lib/wasm/firewall";
 import { eq } from "drizzle-orm";
 
-// nodejs locally (Edge sandbox blocks outbound fetch in dev).
-// On Vercel, set NEXT_RUNTIME=edge in project env vars to use the edge runtime.
-export const runtime = "nodejs";
+// Edge Runtime on Vercel. For local testing use the /api/echo route with nodejs runtime.
+export const runtime = "edge";
 
 // JSON-RPC error object returned when a block-severity rule fires
 function jsonRpcError(id: unknown, message: string) {

@@ -1,11 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm build:wasm && next build",
+  "buildCommand": "next build",
   "installCommand": "pnpm install",
-  "framework": "nextjs",
-  "functions": {
-    "src/app/api/proxy/[...path]/route.ts": {
-      "runtime": "edge"
-    }
-  }
+  "framework": "nextjs"
 }
