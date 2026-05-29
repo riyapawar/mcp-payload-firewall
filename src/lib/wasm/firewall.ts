@@ -89,6 +89,7 @@ export class EdgeFirewall {
           blocked = true;
           return;
         }
+        if (rule.severity === "warn") return; // log only — pass text through unchanged
         const re2 = new RegExp(this.patterns[i].source, "g");
         text = text.replace(re2, rule.replacement);
       }
