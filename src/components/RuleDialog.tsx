@@ -14,6 +14,7 @@ interface RuleDialogProps {
     pattern: string;
     replacement: string;
     severity: string;
+    ruleType?: string;
   };
 }
 
@@ -22,6 +23,9 @@ export function RuleDialog({ trigger, rule }: RuleDialogProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ruleType, setRuleType] = useState<"regex" | "ai">(
+    (rule?.ruleType as "regex" | "ai") ?? "regex"
+  );
 
   const isEdit = !!rule;
 
@@ -37,6 +41,7 @@ export function RuleDialog({ trigger, rule }: RuleDialogProps) {
       pattern: fd.get("pattern"),
       replacement: fd.get("replacement") || "[REDACTED]",
       severity: fd.get("severity"),
+      ruleType,
     };
 
     const res = await fetch("/api/rules", {
@@ -57,6 +62,8 @@ export function RuleDialog({ trigger, rule }: RuleDialogProps) {
     router.refresh();
   }
 
+  const isAI = ruleType === "ai";
+
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
@@ -73,15 +80,50 @@ export function RuleDialog({ trigger, rule }: RuleDialogProps) {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Name" name="name" defaultValue={rule?.name} placeholder="API Key Detector" required />
+            {/* Rule type toggle */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-zinc-300">
+                Detection method
+              </label>
+              <div className="flex rounded-md border border-zinc-700 bg-zinc-800 p-0.5">
+                {(["regex", "ai"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setRuleType(t)}
+                    className={cn(
+                      "flex-1 rounded py-1.5 text-sm font-medium transition",
+                      ruleType === t
+                        ? "bg-zinc-700 text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    {t === "regex" ? "Regex" : "AI (semantic)"}
+                  </button>
+                ))}
+              </div>
+              {isAI && (
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  GPT-4o-mini classifies each payload. Catches novel formats and context-dependent PII that regex misses. Adds ~300ms latency per request.
+                </p>
+              )}
+            </div>
+
+            <Field label="Name" name="name" defaultValue={rule?.name} placeholder="Credential Detector" required />
+
             <Field
-              label="Pattern (regex)"
+              label={isAI ? "Describe what to detect" : "Pattern (regex)"}
               name="pattern"
               defaultValue={rule?.pattern}
-              placeholder="sk-[a-zA-Z0-9]{20,}"
+              placeholder={
+                isAI
+                  ? "API keys, tokens, and credentials of any format"
+                  : "sk-[a-zA-Z0-9]{20,}"
+              }
               required
-              mono
+              mono={!isAI}
             />
+
             <Field
               label="Replacement"
               name="replacement"

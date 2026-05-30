@@ -16,6 +16,7 @@ export const dlpRules = pgTable("dlp_rules", {
   replacement: text("replacement").notNull().default("[REDACTED]"),
   severity: severityEnum("severity").notNull().default("redact"),
   enabled: boolean("enabled").notNull().default(true),
+  ruleType: text("rule_type").$type<"regex" | "ai">().notNull().default("regex"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

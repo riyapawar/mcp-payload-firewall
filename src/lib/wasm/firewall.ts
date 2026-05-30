@@ -21,6 +21,7 @@ export interface DlpRule {
   pattern: string;
   replacement: string;
   severity: "block" | "redact" | "warn";
+  ruleType?: "regex" | "ai";
 }
 
 export interface Threat {
