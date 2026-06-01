@@ -19,20 +19,22 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { name, pattern, replacement, severity } = body;
+  const { name, pattern, replacement, severity, ruleType } = body;
 
   if (!name || !pattern || !severity) {
     return NextResponse.json({ error: "name, pattern, and severity are required" }, { status: 400 });
   }
 
-  // Validate regex
-  try { new RegExp(pattern); } catch {
-    return NextResponse.json({ error: "Invalid regex pattern" }, { status: 400 });
+  // Only validate regex syntax for regex-type rules
+  if (!ruleType || ruleType === "regex") {
+    try { new RegExp(pattern); } catch {
+      return NextResponse.json({ error: "Invalid regex pattern" }, { status: 400 });
+    }
   }
 
   const [rule] = await db
     .insert(dlpRules)
-    .values({ name, pattern, replacement: replacement ?? "[REDACTED]", severity })
+    .values({ name, pattern, replacement: replacement ?? "[REDACTED]", severity, ruleType: ruleType ?? "regex" })
     .returning();
 
   await syncAfterMutation();
@@ -48,7 +50,7 @@ export async function PATCH(req: NextRequest) {
   const { id, ...updates } = body;
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  if (updates.pattern) {
+  if (updates.pattern && (!updates.ruleType || updates.ruleType === "regex")) {
     try { new RegExp(updates.pattern); } catch {
       return NextResponse.json({ error: "Invalid regex pattern" }, { status: 400 });
     }

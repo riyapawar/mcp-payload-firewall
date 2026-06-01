@@ -30,13 +30,19 @@ export async function scanWithAI(
     .map((r, i) => `${i + 1}. "${r.name}" (severity: ${r.severity}): ${r.pattern}`)
     .join("\n");
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 8000);
+
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
       model: "gpt-4o-mini",
       temperature: 0,
       response_format: { type: "json_object" },
@@ -56,8 +62,13 @@ Return {"findings": []} if nothing matches.`,
           content: `Rules:\n${rulesText}\n\nText to scan:\n${text}`,
         },
       ],
-    }),
-  });
+      }),
+    });
+  } catch {
+    clearTimeout(tid);
+    return [];
+  }
+  clearTimeout(tid);
 
   if (!res.ok) return [];
 
