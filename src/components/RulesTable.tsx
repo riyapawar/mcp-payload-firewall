@@ -55,11 +55,24 @@ export function RulesTable({ rules }: { rules: DlpRule[] }) {
         <tbody className="divide-y divide-zinc-800">
           {rules.map((rule) => (
             <tr key={rule.id} className="group">
-              <td className="px-5 py-3 font-medium text-zinc-200">{rule.name}</td>
               <td className="px-5 py-3">
-                <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
-                  {rule.pattern}
-                </code>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-zinc-200">{rule.name}</span>
+                  {rule.ruleType === "ai" && (
+                    <span className="inline-flex items-center rounded-full bg-violet-500/10 px-1.5 py-0.5 text-xs font-medium text-violet-400 ring-1 ring-inset ring-violet-500/20">
+                      AI
+                    </span>
+                  )}
+                </div>
+              </td>
+              <td className="px-5 py-3">
+                {rule.ruleType === "ai" ? (
+                  <span className="text-xs italic text-zinc-500 max-w-[220px] truncate block">{rule.pattern}</span>
+                ) : (
+                  <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
+                    {rule.pattern}
+                  </code>
+                )}
               </td>
               <td className="px-5 py-3">
                 <span
@@ -94,6 +107,7 @@ export function RulesTable({ rules }: { rules: DlpRule[] }) {
                       pattern: rule.pattern,
                       replacement: rule.replacement,
                       severity: rule.severity,
+                      ruleType: rule.ruleType ?? "regex",
                     }}
                     trigger={
                       <button className="rounded p-1 text-zinc-500 hover:text-zinc-300">
