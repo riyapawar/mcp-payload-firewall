@@ -54,7 +54,7 @@ export function RulesTable({ rules }: { rules: DlpRule[] }) {
         </thead>
         <tbody className="divide-y divide-zinc-800">
           {rules.map((rule) => (
-            <tr key={rule.id} className="group">
+            <tr key={rule.id} className="group transition-colors hover:bg-zinc-800/40">
               <td className="px-5 py-3">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-zinc-200">{rule.name}</span>
@@ -87,7 +87,7 @@ export function RulesTable({ rules }: { rules: DlpRule[] }) {
                 <button
                   onClick={() => toggleEnabled(rule)}
                   className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
-                    rule.enabled ? "bg-red-500" : "bg-zinc-700"
+                    rule.enabled ? "bg-emerald-500" : "bg-zinc-700"
                   }`}
                   aria-label="toggle"
                 >
@@ -99,7 +99,7 @@ export function RulesTable({ rules }: { rules: DlpRule[] }) {
                 </button>
               </td>
               <td className="px-5 py-3">
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
                   <RuleDialog
                     rule={{
                       id: rule.id,

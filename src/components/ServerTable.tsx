@@ -48,7 +48,7 @@ export function ServerTable({ servers }: { servers: RegisteredServer[] }) {
         </thead>
         <tbody className="divide-y divide-zinc-800">
           {servers.map((server) => (
-            <tr key={server.id} className="group">
+            <tr key={server.id} className="group transition-colors hover:bg-zinc-800/40">
               <td className="px-5 py-3">
                 <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300">
                   {server.name}
@@ -68,7 +68,7 @@ export function ServerTable({ servers }: { servers: RegisteredServer[] }) {
                 <button
                   onClick={() => toggleEnabled(server)}
                   className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
-                    server.enabled ? "bg-red-500" : "bg-zinc-700"
+                    server.enabled ? "bg-emerald-500" : "bg-zinc-700"
                   }`}
                   aria-label="toggle"
                 >
@@ -80,7 +80,7 @@ export function ServerTable({ servers }: { servers: RegisteredServer[] }) {
                 </button>
               </td>
               <td className="px-5 py-3">
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
                   <ServerDialog
                     server={{
                       id: server.id,

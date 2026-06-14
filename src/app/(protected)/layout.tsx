@@ -1,24 +1,8 @@
 import { auth, signOut } from "@/lib/auth";
-import { cn } from "@/lib/utils";
-import {
-  BarChart2,
-  FileText,
-  KeyRound,
-  LogOut,
-  Server,
-  Shield,
-  ShieldAlert,
-} from "lucide-react";
+import { NavLinks } from "@/components/NavLinks";
+import { Shield } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-
-const nav = [
-  { href: "/dashboard", label: "Dashboard", icon: BarChart2 },
-  { href: "/rules", label: "DLP Rules", icon: ShieldAlert },
-  { href: "/servers", label: "MCP Servers", icon: Server },
-  { href: "/tokens", label: "API Tokens", icon: KeyRound },
-  { href: "/logs", label: "Audit Logs", icon: FileText },
-];
 
 export default async function ProtectedLayout({
   children,
@@ -30,40 +14,34 @@ export default async function ProtectedLayout({
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
-      {/* Sidebar */}
-      <aside className="flex w-60 flex-col border-r border-zinc-800 bg-zinc-900 px-4 py-6">
-        <div className="mb-8 flex items-center gap-2.5 px-2">
-          <Shield className="h-5 w-5 text-red-400" />
-          <span className="font-semibold tracking-tight">MCP Firewall</span>
-        </div>
+      <aside className="flex w-56 flex-col border-r border-zinc-800/60 bg-zinc-950 px-3 py-5">
+        {/* Logo */}
+        <Link
+          href="/dashboard"
+          className="mb-6 flex items-center gap-2.5 px-3 py-1"
+        >
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/15 ring-1 ring-red-500/25">
+            <Shield className="h-3.5 w-3.5 text-red-400" />
+          </div>
+          <span className="text-sm font-semibold tracking-tight text-zinc-200">
+            MCP Firewall
+          </span>
+        </Link>
 
-        <nav className="flex flex-1 flex-col gap-1">
-          {nav.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </Link>
-          ))}
-        </nav>
+        <NavLinks />
 
-        <div className="mt-auto border-t border-zinc-800 pt-4">
-          <div className="mb-3 flex items-center gap-2.5 px-2">
+        {/* User */}
+        <div className="mt-auto border-t border-zinc-800/60 pt-3">
+          <div className="flex items-center gap-2.5 rounded-md px-3 py-2">
             {session.user?.image && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={session.user.image}
                 alt="avatar"
-                className="h-7 w-7 rounded-full"
+                className="h-6 w-6 rounded-full ring-1 ring-zinc-700"
               />
             )}
-            <span className="truncate text-xs text-zinc-400">
+            <span className="min-w-0 flex-1 truncate text-xs text-zinc-500">
               {session.user?.email}
             </span>
           </div>
@@ -75,16 +53,14 @@ export default async function ProtectedLayout({
           >
             <button
               type="submit"
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+              className="w-full rounded-md px-3 py-1.5 text-left text-xs text-zinc-600 transition-colors hover:bg-zinc-800/50 hover:text-zinc-400"
             >
-              <LogOut className="h-4 w-4" />
               Sign out
             </button>
           </form>
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 overflow-auto p-8">{children}</main>
     </div>
   );
