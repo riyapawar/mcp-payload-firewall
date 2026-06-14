@@ -32,11 +32,11 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { ruleId, ruleName, matchedText, replacedWith, path, severity } = body;
+  const { ruleId, ruleName, matchedText, replacedWith, path, severity, direction, serverName } = body;
 
   const [log] = await db
     .insert(auditLogs)
-    .values({ ruleId, ruleName, matchedText, replacedWith, path, severity })
+    .values({ ruleId, ruleName, matchedText, replacedWith, path, severity, direction, serverName })
     .returning();
 
   return NextResponse.json(log, { status: 201 });

@@ -3,7 +3,9 @@ import { cn } from "@/lib/utils";
 import {
   BarChart2,
   FileText,
+  KeyRound,
   LogOut,
+  Server,
   Shield,
   ShieldAlert,
 } from "lucide-react";
@@ -13,6 +15,8 @@ import { redirect } from "next/navigation";
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart2 },
   { href: "/rules", label: "DLP Rules", icon: ShieldAlert },
+  { href: "/servers", label: "MCP Servers", icon: Server },
+  { href: "/tokens", label: "API Tokens", icon: KeyRound },
   { href: "/logs", label: "Audit Logs", icon: FileText },
 ];
 

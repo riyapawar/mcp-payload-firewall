@@ -21,60 +21,26 @@ Without firewall:
 With firewall:
   MCP Client ──► firewall.vercel.app ──► MCP Server
                     │
-                    └─ matches "sk-..." rule → "[REDACTED]"
-                    └─ matches "RSA key" rule → 403 blocked
-                    └─ Audit log written to Postgres
+                    ├─ auth: verify Bearer token
+                    ├─ request: matches "sk-..." rule → "[REDACTED]"
+                    ├─ request: matches "RSA key" rule → 403 blocked
+                    ├─ response: scan MCP server's reply too
+                    └─ audit log: direction, server name, matched rule
 ```
 
 ---
 
-## Detection methods
+## Security model
 
-Rules use one of two detection backends — mix and match as needed:
+Three mechanisms work together:
 
-**Regex** — exact pattern matching, sub-millisecond, no external calls. Right for known credential formats: OpenAI keys, AWS access keys, PEM headers.
+**API token authentication** — every proxy request must include a `Bearer` token generated in the dashboard. Tokens are never stored; only their SHA-256 hash is persisted. If no tokens exist yet, the proxy is open (useful during setup); once the first token is created, auth is enforced on all traffic.
 
-**AI (semantic)** — GPT-4o-mini classifies each payload against a plain-English description you write. Right for anything that doesn't have a fixed format: internal tokens, context-dependent PII, novel credential schemes. Adds ~300ms per request.
+**Named server registry** — upstream MCP servers are registered by name in the dashboard. The proxy resolves `X-MCP-Server: production` to the stored URL. Free-form `X-MCP-Target` URLs are rejected once a registry exists, eliminating SSRF.
 
----
-
-## How to integrate
-
-The firewall exposes `/api/proxy/*` as a transparent reverse proxy. To route an MCP connection through it:
-
-1. Change your MCP client's server URL from the upstream address to the firewall's proxy endpoint.
-2. Add an `X-MCP-Target` header pointing at the real upstream server.
-
-The path after `/api/proxy` is forwarded verbatim. Headers and query strings pass through unchanged.
-
-### Claude Desktop
-
-In `~/.config/claude/claude_desktop_config.json` (or the Windows equivalent in `%APPDATA%\Claude\`):
-
-```json
-{
-  "mcpServers": {
-    "my-server": {
-      "url": "https://your-deployment.vercel.app/api/proxy/mcp",
-      "headers": {
-        "X-MCP-Target": "https://actual-mcp-server.example.com"
-      }
-    }
-  }
-}
-```
-
-### Any HTTP MCP client
-
-```
-Before: POST https://actual-mcp-server.example.com/messages
-After:  POST https://your-deployment.vercel.app/api/proxy/messages
-        X-MCP-Target: https://actual-mcp-server.example.com
-```
-
-### Default upstream
-
-If all your traffic goes to one MCP server, set `UPSTREAM_MCP_URL` in your environment variables instead of passing the header on every request.
+**DLP rule engine** — two detection layers run on every request and response payload:
+- **Regex** — exact pattern matching, sub-millisecond, no external calls
+- **AI (semantic)** — GPT-4o-mini classifies each payload against a plain-English description, catching novel formats and context-dependent data that regex can't know about (~300ms added latency)
 
 ---
 
@@ -88,9 +54,57 @@ If all your traffic goes to one MCP server, set `UPSTREAM_MCP_URL` in your envir
 
 ---
 
-## Starter rules
+## How to integrate
 
-Add these from the dashboard to be protected immediately:
+### 1. Register your MCP server
+
+In the dashboard → **MCP Servers → Register server**:
+
+| Field | Example |
+|-------|---------|
+| Name | `production` |
+| URL | `https://your-mcp-server.example.com` |
+
+### 2. Create an API token
+
+In the dashboard → **API Tokens → Create**. Copy the token when it appears — it is shown once.
+
+### 3. Point your MCP client at the proxy
+
+Replace the upstream URL with the firewall's proxy endpoint. Pass the registered server name and your token:
+
+```
+POST https://your-deployment.vercel.app/api/proxy/messages
+Authorization: Bearer mcpfw_...
+X-MCP-Server: production
+Content-Type: application/json
+```
+
+The path after `/api/proxy` is forwarded verbatim to the registered server.
+
+### Claude Desktop
+
+In `~/.config/claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "url": "https://your-deployment.vercel.app/api/proxy/mcp",
+      "headers": {
+        "Authorization": "Bearer mcpfw_...",
+        "X-MCP-Server": "production"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Starter DLP rules
+
+Add these from **Dashboard → DLP Rules**:
 
 | Name | Detection | Pattern / Description | Severity |
 |------|-----------|----------------------|----------|
@@ -105,13 +119,11 @@ Add these from the dashboard to be protected immediately:
 | Internal API tokens | AI | "API keys, tokens, and credentials of any format" | redact |
 | Email Address | Regex | `[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}` | warn |
 
-For AI rules, the pattern field is a plain-English description of what GPT-4o-mini should detect. It will match credential formats, contextual PII, or anything you can describe in a sentence — even tokens with no fixed format.
-
 ---
 
-## Live demo
+## Demo
 
-Run these from a PowerShell terminal against the live deployment:
+Run against the live deployment (no auth required on demo — no tokens configured):
 
 ```powershell
 $base = "https://mcp-payload-firewall.vercel.app/api/proxy/post"
@@ -137,13 +149,7 @@ try {
   $_.Exception.Response.GetResponseStream() |
     ForEach-Object { [System.IO.StreamReader]::new($_).ReadToEnd() }
 }
-# → {"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Blocked by DLP rule: RSA Private Key"}}
-
-# WARN — email passes through but is logged
-Invoke-WebRequest -Uri $base -Method POST -Headers $h `
-  -Body '{"contact":"user@example.com"}' -UseBasicParsing |
-  ConvertFrom-Json | Select-Object -ExpandProperty data
-# → {"contact":"user@example.com"}   (visible in audit log at /dashboard/logs)
+# → {"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Request payload blocked by DLP rule: RSA Private Key"}}
 ```
 
 Or run the bundled script: `powershell -ExecutionPolicy Bypass -File demo.ps1`
@@ -154,72 +160,66 @@ Or run the bundled script: `powershell -ExecutionPolicy Bypass -File demo.ps1`
 
 ### 1. Neon Postgres
 
-1. Create a project at [neon.tech](https://neon.tech) (free tier works).
-2. From the connection details page, copy:
-   - **Pooled connection string** → `DATABASE_URL`
-   - **Unpooled connection string** → `DATABASE_URL_UNPOOLED`
+Create a project at [neon.tech](https://neon.tech) (free tier works). Copy:
+- Pooled connection string → `DATABASE_URL`
+- Unpooled connection string → `DATABASE_URL_UNPOOLED`
 
 ### 2. GitHub OAuth App
 
-1. Go to [github.com/settings/developers](https://github.com/settings/developers) → **OAuth Apps → New OAuth App**.
-2. Set:
-   - Homepage URL: `https://your-deployment.vercel.app`
-   - Callback URL: `https://your-deployment.vercel.app/api/auth/callback/github`
-3. If you use a custom domain, add it as a second callback URL: `https://your-domain.com/api/auth/callback/github`
-4. Copy the **Client ID** → `AUTH_GITHUB_ID` and generate a **Client Secret** → `AUTH_GITHUB_SECRET`.
+At [github.com/settings/developers](https://github.com/settings/developers) → **OAuth Apps → New**:
+- Homepage URL: `https://your-deployment.vercel.app`
+- Callback URL: `https://your-deployment.vercel.app/api/auth/callback/github`
+
+If you use a custom domain, add a second callback: `https://your-domain.com/api/auth/callback/github`
+
+Copy **Client ID** → `AUTH_GITHUB_ID` and generate **Client Secret** → `AUTH_GITHUB_SECRET`.
 
 ### 3. Deploy to Vercel
 
-1. Fork or push this repo to GitHub.
-2. Import the project in [vercel.com/new](https://vercel.com/new).
-3. Vercel detects Next.js automatically — no build config needed.
+Fork/push this repo and import at [vercel.com/new](https://vercel.com/new). Vercel detects Next.js automatically.
 
 ### 4. Vercel Edge Config
 
-1. In your Vercel project, go to **Storage → Edge Config → Create**.
-2. **Connect** the store to your project (this generates the `EDGE_CONFIG` connection string).
-3. Go to **Settings → Tokens → Create Token** with Edge Config write scope → `VERCEL_EDGE_CONFIG_TOKEN`.
+In your Vercel project → **Storage → Edge Config → Create**. Connect the store to your project (generates `EDGE_CONFIG`). Then **Settings → Tokens → Create** with Edge Config write scope → `VERCEL_EDGE_CONFIG_TOKEN`.
 
 ### 5. Environment variables
 
-In Vercel → **Settings → Environment Variables**, add all of these:
+In Vercel → **Settings → Environment Variables**:
 
 ```bash
 # Database (Neon)
 DATABASE_URL=              # pooled connection string
-DATABASE_URL_UNPOOLED=     # unpooled (used by drizzle-kit for migrations)
+DATABASE_URL_UNPOOLED=     # unpooled (for drizzle-kit migrations)
 
 # Auth.js
-AUTH_SECRET=               # generate: openssl rand -base64 32
-AUTH_GITHUB_ID=            # GitHub OAuth App client ID
-AUTH_GITHUB_SECRET=        # GitHub OAuth App client secret
-ADMIN_EMAIL=               # the GitHub account email allowed to sign in
+AUTH_SECRET=               # openssl rand -base64 32
+AUTH_GITHUB_ID=
+AUTH_GITHUB_SECRET=
+ADMIN_EMAIL=               # GitHub account email allowed to sign in
 
 # Vercel Edge Config
 EDGE_CONFIG=               # connection string from Storage → Edge Config
 VERCEL_EDGE_CONFIG_TOKEN=  # Vercel API token with Edge Config write access
 
 # Proxy
-UPSTREAM_MCP_URL=          # optional default upstream if you skip the X-MCP-Target header
-FIREWALL_INTERNAL_KEY=     # generate: openssl rand -hex 32
-OPENAI_API_KEY=            # required for AI-type rules; skip if you only use regex
+UPSTREAM_MCP_URL=          # optional single-server fallback (used without X-MCP-Server)
+FIREWALL_INTERNAL_KEY=     # openssl rand -hex 32
+OPENAI_API_KEY=            # required for AI-type rules; omit to use regex only
 ```
 
 ### 6. Run migrations
-
-After adding environment variables, open a terminal and run:
 
 ```bash
 pnpm db:push
 ```
 
-This creates the `dlp_rules` and `audit_logs` tables in your Neon database.
+### 7. First-time setup
 
-### 7. Add your first rule
-
-1. Open `/dashboard` and sign in with the GitHub account matching `ADMIN_EMAIL`.
-2. Go to **Rules → New Rule**. Add at least one rule and save it.
-3. Saving a rule triggers an automatic sync to Edge Config — the proxy is now live.
+1. Sign in at `/dashboard` with the GitHub account matching `ADMIN_EMAIL`.
+2. **MCP Servers** → register your upstream server.
+3. **DLP Rules** → add rules. Saving triggers an automatic Edge Config sync.
+4. **API Tokens** → create a token. Copy it — it won't be shown again.
+5. Update your MCP client config to use the proxy URL, token, and server name.
 
 ---
 
@@ -230,11 +230,11 @@ git clone https://github.com/yourusername/mcp-payload-firewall
 cd mcp-payload-firewall
 pnpm install
 cp .env.local.example .env.local   # fill in all values
-pnpm db:push                        # create tables in Neon
-pnpm dev                            # http://localhost:3000
+pnpm db:push
+pnpm dev
 ```
 
-Test locally using httpbin as a stand-in upstream:
+Test against httpbin (no registered servers needed in local dev — `X-MCP-Target` still works):
 
 ```powershell
 Invoke-WebRequest -Uri "http://localhost:3000/api/proxy/post" `
@@ -250,26 +250,34 @@ Invoke-WebRequest -Uri "http://localhost:3000/api/proxy/post" `
 ```
 Request ──► Edge Proxy (Vercel Edge Runtime)
                 │
-                ├── Load rules from Edge Config (< 1ms, in-process)
-                ├── Regex rules → V8 RegExp engine
-                ├── AI rules → GPT-4o-mini (AbortController, 8s timeout)
+                ├── Verify Bearer token (SHA-256 hash in Edge Config)
+                ├── Resolve X-MCP-Server name → URL (Edge Config registry)
+                ├── Load DLP rules from Edge Config (< 1ms, in-process)
                 │
-                ├── block  → JSON-RPC error {"code":-32600}
-                ├── redact → replace match inline, forward to upstream
-                └── warn   → log to /api/logs (Node runtime) via internal HTTP
-                                │
-                                └── Writes to Neon Postgres (audit_logs table)
+                ├── Scan request body
+                │     ├── Regex rules → V8 RegExp engine
+                │     └── AI rules → GPT-4o-mini (8s AbortController timeout)
+                │
+                ├── Forward to upstream MCP server
+                │
+                └── Scan response body (same pipeline)
+                        │
+                        ├── block  → JSON-RPC error {"code":-32600}
+                        ├── redact → replace match, return to client
+                        └── warn   → log to /api/logs (Node runtime, Neon Postgres)
 
 Dashboard (Next.js, Node runtime)
-    ├── /api/rules  → CRUD rules in Neon, sync to Edge Config after each write
-    └── /api/logs   → paginated audit log reads from Neon
+    ├── /api/rules   → CRUD rules in Neon, sync to Edge Config
+    ├── /api/servers → CRUD server registry, sync to Edge Config
+    ├── /api/tokens  → create/revoke tokens, sync SHA-256 hashes to Edge Config
+    └── /api/logs    → audit log reads (direction: request|response, server name)
 ```
 
-**Why Edge Config instead of a database on the hot path?**  
-Edge Config is an in-process key-value store — reads are under 1ms with no network round-trip. Drizzle ORM (Neon) cannot open TCP connections in the Edge Runtime, so the proxy reads rules exclusively from Edge Config and delegates all writes to the Node.js `/api/logs` route via an authenticated internal HTTP call.
+**Why Edge Config?** In-process key-value store — reads under 1ms, no network round-trip. Drizzle ORM (Neon) can't open TCP in Edge Runtime, so all DB writes are delegated to the Node.js API routes via an authenticated internal HTTP call.
 
-**Why buffer the response instead of streaming through a TransformStream?**  
-For standard JSON-RPC responses, buffering lets the firewall return a clean JSON-RPC error when a block rule fires — HTTP status and headers aren't committed until the full body is scanned. SSE responses (`text/event-stream`) still stream through a TransformStream, where a block aborts the stream.
+**Why buffer instead of streaming?** For standard JSON-RPC responses, buffering lets the firewall return a clean JSON-RPC error on block — HTTP headers aren't committed until the full body is scanned. SSE (`text/event-stream`) streams through a TransformStream, where a block aborts the stream.
+
+**Why is token auth opt-in?** If no tokens exist, the proxy passes all traffic — same behavior as before. The moment you create the first token from the dashboard, auth is enforced globally. This avoids a footgun where someone deploys, adds a token, and locks themselves out.
 
 ---
 
@@ -279,7 +287,7 @@ For standard JSON-RPC responses, buffering lets the firewall return a clean JSON
 |-------|-----------|
 | Framework | Next.js 15 (App Router) |
 | Edge proxy | Vercel Edge Runtime |
-| Rule store (hot path) | Vercel Edge Config |
+| Rule/server/token store (hot path) | Vercel Edge Config |
 | Database | Neon Postgres + Drizzle ORM |
 | AI detection | OpenAI GPT-4o-mini |
 | Auth | Auth.js v5 (GitHub OAuth) |

@@ -1,0 +1,112 @@
+"use client";
+
+import type { RegisteredServer } from "@/lib/db/schema";
+import { Pencil, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { ServerDialog } from "./ServerDialog";
+
+export function ServerTable({ servers }: { servers: RegisteredServer[] }) {
+  const router = useRouter();
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  async function toggleEnabled(server: RegisteredServer) {
+    await fetch("/api/servers", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: server.id, enabled: !server.enabled }),
+    });
+    router.refresh();
+  }
+
+  async function deleteServer(id: string) {
+    setDeleting(id);
+    await fetch(`/api/servers?id=${id}`, { method: "DELETE" });
+    setDeleting(null);
+    router.refresh();
+  }
+
+  if (servers.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-zinc-700 py-12 text-center text-sm text-zinc-500">
+        No servers registered. Add one to enable the SSRF-safe proxy header.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-zinc-800 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
+            <th className="px-5 py-3">Name</th>
+            <th className="px-5 py-3">URL</th>
+            <th className="px-5 py-3">Description</th>
+            <th className="px-5 py-3">Enabled</th>
+            <th className="px-5 py-3" />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-800">
+          {servers.map((server) => (
+            <tr key={server.id} className="group">
+              <td className="px-5 py-3">
+                <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300">
+                  {server.name}
+                </code>
+              </td>
+              <td className="px-5 py-3">
+                <span className="text-xs text-zinc-400 max-w-[220px] truncate block">
+                  {server.url}
+                </span>
+              </td>
+              <td className="px-5 py-3">
+                <span className="text-xs text-zinc-500">
+                  {server.description ?? "—"}
+                </span>
+              </td>
+              <td className="px-5 py-3">
+                <button
+                  onClick={() => toggleEnabled(server)}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+                    server.enabled ? "bg-red-500" : "bg-zinc-700"
+                  }`}
+                  aria-label="toggle"
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${
+                      server.enabled ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </td>
+              <td className="px-5 py-3">
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ServerDialog
+                    server={{
+                      id: server.id,
+                      name: server.name,
+                      url: server.url,
+                      description: server.description,
+                    }}
+                    trigger={
+                      <button className="rounded p-1 text-zinc-500 hover:text-zinc-300">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    }
+                  />
+                  <button
+                    onClick={() => deleteServer(server.id)}
+                    disabled={deleting === server.id}
+                    className="rounded p-1 text-zinc-500 hover:text-red-400 disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
